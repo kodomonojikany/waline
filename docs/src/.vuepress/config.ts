@@ -1,11 +1,11 @@
-import { path } from '@vuepress/utils';
-import { defineUserConfig } from 'vuepress';
-import { redirectPlugin } from 'vuepress-plugin-redirect';
-import { addViteSsrNoExternal } from 'vuepress-shared';
+import { addViteSsrNoExternal } from '@vuepress/helper';
+import { redirectPlugin } from '@vuepress/plugin-redirect';
+import { type UserConfig, defineUserConfig } from 'vuepress';
+import { path } from 'vuepress/utils';
 
 import theme from './theme.js';
 
-export default defineUserConfig({
+export default <UserConfig>defineUserConfig({
   locales: {
     '/': {
       lang: 'zh-CN',
