@@ -29,10 +29,9 @@ async function formatCmt(
     comment.label = user.label;
   }
 
-  const avatarUrl =
-    user && user.avatar
-      ? user.avatar
-      : await think.service('avatar').stringify(comment);
+  const avatarUrl = user?.avatar
+    ? user.avatar
+    : await think.service('avatar').stringify(comment);
 
   comment.avatar =
     avatarProxy && !avatarUrl.includes(avatarProxy)
@@ -576,10 +575,15 @@ module.exports = class extends BaseRest {
           cmt.children.forEach((c) => {
             const parent = childCommentsMap.get(c.pid);
 
+            // fix https://github.com/walinejs/waline/issues/2518 avoid some abnormal comment data
+            if (!parent) {
+              return;
+            }
+
             c.reply_user = {
-              nick: parent.nick,
-              link: parent.link,
-              avatar: parent.avatar,
+              nick: parent?.nick,
+              link: parent?.link,
+              avatar: parent?.avatar,
             };
           });
 

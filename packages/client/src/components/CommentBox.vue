@@ -1,5 +1,525 @@
+<script setup lang="ts">
+import { useDebounceFn, useEventListener } from '@vueuse/core';
+import type { WalineComment, WalineCommentData } from '@waline/api';
+import { UserInfo, addComment, login, updateComment } from '@waline/api';
+import autosize from 'autosize';
+import type { ComputedRef, DeepReadonly } from 'vue';
+import {
+  computed,
+  inject,
+  nextTick,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
+
+import {
+  CloseIcon,
+  EmojiIcon,
+  GifIcon,
+  ImageIcon,
+  LoadingIcon,
+  MarkdownIcon,
+  PreviewIcon,
+} from './Icons.js';
+import ImageWall from './ImageWall.vue';
+import {
+  useEditor,
+  useReCaptcha,
+  useTurnstile,
+  useUserInfo,
+  useUserMeta,
+} from '../composables/index.js';
+import type {
+  WalineImageUploader,
+  WalineSearchOptions,
+  WalineSearchResult,
+} from '../typings/index.js';
+import type { WalineConfig, WalineEmojiConfig } from '../utils/index.js';
+import {
+  getEmojis,
+  getImageFromDataTransfer,
+  getWordNumber,
+  isValidEmail,
+  parseEmoji,
+  parseMarkdown,
+  userAgent,
+} from '../utils/index.js';
+
+const props = withDefaults(
+  defineProps<{
+    /**
+     * Current comment to be edited
+     */
+    edit?: WalineComment | null;
+    /**
+     * Root comment id
+     */
+    rootId?: string;
+    /**
+     * Comment id to be replied
+     */
+    replyId?: string;
+    /**
+     * User name to be replied
+     */
+    replyUser?: string;
+  }>(),
+  {
+    edit: null,
+    rootId: '',
+    replyId: '',
+    replyUser: '',
+  },
+);
+
+const emit = defineEmits<{
+  (event: 'log'): void;
+  (event: 'cancelEdit'): void;
+  (event: 'cancelReply'): void;
+  (event: 'submit', comment: WalineComment): void;
+}>();
+
+const config = inject<ComputedRef<WalineConfig>>('config')!;
+
+const editor = useEditor();
+const userMeta = useUserMeta();
+const userInfo = useUserInfo();
+
+const inputRefs = ref<Record<string, HTMLInputElement>>({});
+const editorRef = ref<HTMLTextAreaElement | null>(null);
+const imageUploadRef = ref<HTMLInputElement | null>(null);
+const emojiButtonRef = ref<HTMLDivElement | null>(null);
+const emojiPopupRef = ref<HTMLDivElement | null>(null);
+const gifButtonRef = ref<HTMLDivElement | null>(null);
+const gifPopupRef = ref<HTMLDivElement | null>(null);
+const gifSearchInputRef = ref<HTMLInputElement | null>(null);
+
+const emoji = ref<DeepReadonly<WalineEmojiConfig>>({ tabs: [], map: {} });
+const emojiTabIndex = ref(0);
+const showEmoji = ref(false);
+const showGif = ref(false);
+const showPreview = ref(false);
+const previewText = ref('');
+const wordNumber = ref(0);
+
+const searchResults = reactive({
+  loading: true,
+  list: [] as WalineSearchResult,
+});
+
+const wordLimit = ref(0);
+const isWordNumberLegal = ref(false);
+
+const content = ref('');
+
+const isSubmitting = ref(false);
+
+const isImageListEnd = ref(false);
+
+const locale = computed(() => config.value.locale);
+
+const isLogin = computed(() => Boolean(userInfo.value?.token));
+
+const canUploadImage = computed(() => config.value.imageUploader !== false);
+
+const insert = (content: string): void => {
+  const textArea = editorRef.value!;
+  const startPosition = textArea.selectionStart;
+  const endPosition = textArea.selectionEnd || 0;
+  const scrollTop = textArea.scrollTop;
+
+  editor.value =
+    textArea.value.substring(0, startPosition) +
+    content +
+    textArea.value.substring(endPosition, textArea.value.length);
+  textArea.focus();
+  textArea.selectionStart = startPosition + content.length;
+  textArea.selectionEnd = startPosition + content.length;
+  textArea.scrollTop = scrollTop;
+};
+
+const onKeyDown = (event: KeyboardEvent): void => {
+  if (isSubmitting.value) {
+    return;
+  }
+
+  const key = event.key;
+
+  // Shortcut key
+  if ((event.ctrlKey || event.metaKey) && key === 'Enter') void submitComment();
+};
+
+const uploadImage = (file: File): Promise<void> => {
+  const uploadText = `![${config.value.locale.uploading} ${file.name}]()`;
+
+  insert(uploadText);
+  isSubmitting.value = true;
+
+  return Promise.resolve()
+    .then(() => (config.value.imageUploader as WalineImageUploader)(file))
+    .then((url) => {
+      editor.value = editor.value.replace(
+        uploadText,
+        `\r\n![${file.name}](${url})`,
+      );
+    })
+    .catch((err: Error) => {
+      alert(err.message);
+      editor.value = editor.value.replace(uploadText, '');
+    })
+    .then(() => {
+      isSubmitting.value = false;
+    });
+};
+
+const onDrop = (event: DragEvent): void => {
+  if (event.dataTransfer?.items) {
+    const file = getImageFromDataTransfer(event.dataTransfer.items);
+
+    if (file && canUploadImage.value) {
+      void uploadImage(file);
+      event.preventDefault();
+    }
+  }
+};
+
+const onPaste = (event: ClipboardEvent): void => {
+  if (event.clipboardData) {
+    const file = getImageFromDataTransfer(event.clipboardData.items);
+
+    if (file && canUploadImage.value) void uploadImage(file);
+  }
+};
+
+const onChange = (): void => {
+  const inputElement = imageUploadRef.value!;
+
+  if (inputElement.files && canUploadImage.value)
+    void uploadImage(inputElement.files[0]).then(() => {
+      // clear input so a same image can be uploaded later
+      inputElement.value = '';
+    });
+};
+
+const submitComment = async (): Promise<void> => {
+  const {
+    serverURL,
+    lang,
+    login,
+    wordLimit,
+    requiredMeta,
+    recaptchaV3Key,
+    turnstileKey,
+  } = config.value;
+
+  const ua = await userAgent();
+  const comment: WalineCommentData = {
+    comment: content.value,
+    nick: userMeta.value.nick,
+    mail: userMeta.value.mail,
+    link: userMeta.value.link,
+    url: config.value.path,
+    ua,
+  };
+
+  if (!props.edit) {
+    // https://github.com/walinejs/waline/issues/2163
+    if (userInfo.value?.token) {
+      // login user
+      comment.nick = userInfo.value.display_name;
+      comment.mail = userInfo.value.email;
+      comment.link = userInfo.value.url;
+    } else {
+      if (login === 'force') return;
+
+      // check nick
+      if (requiredMeta.includes('nick') && !comment.nick) {
+        inputRefs.value.nick?.focus();
+
+        return alert(locale.value.nickError);
+      }
+
+      // check mail
+      if (
+        (requiredMeta.includes('mail') && !comment.mail) ||
+        (comment.mail && !isValidEmail(comment.mail))
+      ) {
+        inputRefs.value.mail?.focus();
+
+        return alert(locale.value.mailError);
+      }
+
+      if (!comment.nick) comment.nick = locale.value.anonymous;
+    }
+  }
+
+  // check comment
+  if (!comment.comment) {
+    editorRef.value?.focus();
+
+    return;
+  }
+
+  if (!isWordNumberLegal.value)
+    return alert(
+      locale.value.wordHint
+        .replace('$0', (wordLimit as [number, number])[0].toString())
+        .replace('$1', (wordLimit as [number, number])[1].toString())
+        .replace('$2', wordNumber.value.toString()),
+    );
+
+  comment.comment = parseEmoji(comment.comment, emoji.value.map);
+
+  if (props.replyId && props.rootId) {
+    comment.pid = props.replyId;
+    comment.rid = props.rootId;
+    comment.at = props.replyUser;
+  }
+
+  isSubmitting.value = true;
+
+  try {
+    if (recaptchaV3Key)
+      comment.recaptchaV3 =
+        await useReCaptcha(recaptchaV3Key).execute('social');
+
+    if (turnstileKey)
+      comment.turnstile = await useTurnstile(turnstileKey).execute('social');
+
+    const options = {
+      serverURL,
+      lang,
+      token: userInfo.value?.token,
+      comment,
+    };
+
+    const response = await (props.edit
+      ? updateComment({
+          objectId: props.edit.objectId,
+          ...options,
+        })
+      : addComment(options));
+
+    isSubmitting.value = false;
+
+    if (response.errmsg) return alert(response.errmsg);
+
+    emit('submit', response.data!);
+
+    editor.value = '';
+
+    previewText.value = '';
+
+    // ensure changes are applied to dom to avoid  https://github.com/walinejs/waline/issues/2371
+    await nextTick();
+
+    if (props.replyId) emit('cancelReply');
+    if (props.edit?.objectId) emit('cancelEdit');
+  } catch (err: unknown) {
+    isSubmitting.value = false;
+
+    alert((err as TypeError).message);
+  }
+};
+
+const onLogin = (event: Event): void => {
+  event.preventDefault();
+  const { lang, serverURL } = config.value;
+
+  void login({
+    serverURL,
+    lang,
+  }).then((data) => {
+    userInfo.value = data;
+    (data.remember ? localStorage : sessionStorage).setItem(
+      'WALINE_USER',
+      JSON.stringify(data),
+    );
+    emit('log');
+  });
+};
+
+const onLogout = (): void => {
+  userInfo.value = {};
+  localStorage.setItem('WALINE_USER', 'null');
+  sessionStorage.setItem('WALINE_USER', 'null');
+  emit('log');
+};
+
+const onProfile = (event: Event): void => {
+  event.preventDefault();
+
+  const { lang, serverURL } = config.value;
+
+  const width = 800;
+  const height = 800;
+  const left = (window.innerWidth - width) / 2;
+  const top = (window.innerHeight - height) / 2;
+  const query = new URLSearchParams({
+    lng: lang,
+    token: userInfo.value.token,
+  });
+  const handler = window.open(
+    `${serverURL}/ui/profile?${query.toString()}`,
+    '_blank',
+    `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no`,
+  );
+
+  handler?.postMessage({ type: 'TOKEN', data: userInfo.value.token }, '*');
+};
+
+const popupHandler = (event: MouseEvent): void => {
+  if (
+    !emojiButtonRef.value?.contains(event.target as Node) &&
+    !emojiPopupRef.value?.contains(event.target as Node)
+  )
+    showEmoji.value = false;
+
+  if (
+    !gifButtonRef.value?.contains(event.target as Node) &&
+    !gifPopupRef.value?.contains(event.target as Node)
+  )
+    showGif.value = false;
+};
+
+const onImageWallScroll = async (event: Event): Promise<void> => {
+  const { scrollTop, clientHeight, scrollHeight } =
+    event.target as HTMLDivElement;
+  const percent = (clientHeight + scrollTop) / scrollHeight;
+  const searchOptions = config.value.search as WalineSearchOptions;
+  const keyword = gifSearchInputRef.value?.value ?? '';
+
+  if (percent < 0.9 || searchResults.loading || isImageListEnd.value) return;
+
+  searchResults.loading = true;
+
+  const searchResult =
+    searchOptions.more && searchResults.list.length
+      ? await searchOptions.more(keyword, searchResults.list.length)
+      : await searchOptions.search(keyword);
+
+  if (searchResult.length)
+    searchResults.list = [
+      ...searchResults.list,
+      ...(searchOptions.more && searchResults.list.length
+        ? await searchOptions.more(keyword, searchResults.list.length)
+        : await searchOptions.search(keyword)),
+    ];
+  else isImageListEnd.value = true;
+
+  searchResults.loading = false;
+
+  setTimeout(() => {
+    (event.target as HTMLDivElement).scrollTop = scrollTop;
+  }, 50);
+};
+
+const onGifSearch = useDebounceFn((event: Event) => {
+  searchResults.list = [];
+  isImageListEnd.value = false;
+  void onImageWallScroll(event);
+}, 300);
+
+// update wordNumber
+watch(
+  [config, wordNumber],
+  ([config, wordNumber]) => {
+    const { wordLimit: limit } = config;
+
+    if (limit) {
+      if (wordNumber < limit[0] && limit[0] !== 0) {
+        wordLimit.value = limit[0];
+        isWordNumberLegal.value = false;
+      } else if (wordNumber > limit[1]) {
+        wordLimit.value = limit[1];
+        isWordNumberLegal.value = false;
+      } else {
+        wordLimit.value = limit[1];
+        isWordNumberLegal.value = true;
+      }
+    } else {
+      wordLimit.value = 0;
+      isWordNumberLegal.value = true;
+    }
+  },
+  { immediate: true },
+);
+
+useEventListener('click', popupHandler);
+useEventListener(
+  'message',
+  ({ data }: { data: { type: 'profile'; data: UserInfo } }) => {
+    if (!data || data.type !== 'profile') return;
+
+    userInfo.value = { ...userInfo.value, ...data.data };
+
+    [localStorage, sessionStorage]
+      .filter((store) => store.getItem('WALINE_USER'))
+      .forEach((store) =>
+        store.setItem('WALINE_USER', JSON.stringify(userInfo)),
+      );
+  },
+);
+
+// watch gif
+watch(showGif, async (showGif) => {
+  if (!showGif) return;
+
+  const searchOptions = config.value.search as WalineSearchOptions;
+
+  // clear input
+  if (gifSearchInputRef.value) gifSearchInputRef.value.value = '';
+
+  searchResults.loading = true;
+
+  searchResults.list = await (searchOptions.default?.() ??
+    searchOptions.search(''));
+
+  searchResults.loading = false;
+});
+
+onMounted(() => {
+  if (props.edit?.objectId) {
+    editor.value = props.edit.orig;
+  }
+
+  // watch editor
+  watch(
+    () => editor.value,
+    (value) => {
+      const { highlighter, texRenderer } = config.value;
+
+      content.value = value;
+      previewText.value = parseMarkdown(value, {
+        emojiMap: emoji.value.map,
+        highlighter,
+        texRenderer,
+      });
+      wordNumber.value = getWordNumber(value);
+
+      if (value) autosize(editorRef.value!);
+      // eslint-disable-next-line import-x/no-named-as-default-member
+      else autosize.destroy(editorRef.value!);
+    },
+    { immediate: true },
+  );
+
+  // watch emoji value change
+  watch(
+    () => config.value.emoji,
+    (emojiConfig) =>
+      getEmojis(emojiConfig).then((config) => {
+        emoji.value = config;
+      }),
+    { immediate: true },
+  );
+});
+</script>
+
 <template>
-  <div class="wl-comment">
+  <div :key="userInfo.token" class="wl-comment">
     <div
       v-if="config.login !== 'disable' && isLogin && !edit?.objectId"
       class="wl-login-info"
@@ -128,6 +648,7 @@
             id="wl-image-upload"
             ref="imageUploadRef"
             class="upload"
+            aria-hidden="true"
             type="file"
             accept=".png,.jpg,.jpeg,.webp,.bmp,.gif"
             @change="onChange"
@@ -138,6 +659,7 @@
             for="wl-image-upload"
             class="wl-action"
             :title="locale.uploadImage"
+            :aria-label="locale.uploadImage"
           >
             <ImageIcon />
           </label>
@@ -154,7 +676,7 @@
         </div>
 
         <div class="wl-info">
-          <div class="wl-captcha-container"></div>
+          <div class="wl-captcha-container" />
 
           <div class="wl-text-number">
             {{ wordNumber }}
@@ -213,8 +735,7 @@
             :gap="6"
             @insert="insert($event)"
             @scroll="onImageWallScroll"
-          >
-          </ImageWall>
+          />
 
           <div v-if="searchResults.loading" class="wl-loading">
             <LoadingIcon :size="30" />
@@ -278,535 +799,9 @@
       type="button"
       class="wl-close"
       :title="locale.cancelReply"
-      @click="$emit(replyId ? 'cancelReply' : 'cancelEdit')"
+      @click="replyId ? emit('cancelReply') : emit('cancelEdit')"
     >
       <CloseIcon :size="24" />
     </button>
   </div>
 </template>
-
-<script setup lang="ts">
-import { useDebounceFn } from '@vueuse/core';
-import {
-  type WalineComment,
-  type WalineCommentData,
-  addComment,
-  login,
-  updateComment,
-  UserInfo,
-} from '@waline/api';
-import autosize from 'autosize';
-import {
-  type ComputedRef,
-  type DeepReadonly,
-  computed,
-  inject,
-  onMounted,
-  onUnmounted,
-  reactive,
-  ref,
-  watch,
-} from 'vue';
-
-import {
-  CloseIcon,
-  EmojiIcon,
-  GifIcon,
-  ImageIcon,
-  LoadingIcon,
-  MarkdownIcon,
-  PreviewIcon,
-} from './Icons.js';
-import ImageWall from './ImageWall.vue';
-import {
-  useEditor,
-  useReCaptcha,
-  useTurnstile,
-  useUserInfo,
-  useUserMeta,
-} from '../composables/index.js';
-import {
-  type WalineImageUploader,
-  type WalineSearchOptions,
-  type WalineSearchResult,
-} from '../typings/index.js';
-import {
-  type WalineConfig,
-  type WalineEmojiConfig,
-  getEmojis,
-  getImageFromDataTransfer,
-  isValidEmail,
-  getWordNumber,
-  parseEmoji,
-  parseMarkdown,
-  userAgent,
-} from '../utils/index.js';
-
-const props = withDefaults(
-  defineProps<{
-    /**
-     * Current comment to be edited
-     */
-    edit?: WalineComment | null;
-    /**
-     * Root comment id
-     */
-    rootId?: string;
-    /**
-     * Comment id to be replied
-     */
-    replyId?: string;
-    /**
-     * User name to be replied
-     */
-    replyUser?: string;
-  }>(),
-  {
-    edit: null,
-    rootId: '',
-    replyId: '',
-    replyUser: '',
-  },
-);
-
-const emit = defineEmits<{
-  (event: 'log'): void;
-  (event: 'cancelEdit'): void;
-  (event: 'cancelReply'): void;
-  (event: 'submit', comment: WalineComment): void;
-}>();
-
-defineExpose();
-
-const config = inject<ComputedRef<WalineConfig>>('config')!;
-
-const editor = useEditor();
-const userMeta = useUserMeta();
-const userInfo = useUserInfo();
-
-const inputRefs = ref<Record<string, HTMLInputElement>>({});
-const editorRef = ref<HTMLTextAreaElement | null>(null);
-const imageUploadRef = ref<HTMLInputElement | null>(null);
-const emojiButtonRef = ref<HTMLDivElement | null>(null);
-const emojiPopupRef = ref<HTMLDivElement | null>(null);
-const gifButtonRef = ref<HTMLDivElement | null>(null);
-const gifPopupRef = ref<HTMLDivElement | null>(null);
-const gifSearchInputRef = ref<HTMLInputElement | null>(null);
-
-const emoji = ref<DeepReadonly<WalineEmojiConfig>>({ tabs: [], map: {} });
-const emojiTabIndex = ref(0);
-const showEmoji = ref(false);
-const showGif = ref(false);
-const showPreview = ref(false);
-const previewText = ref('');
-const wordNumber = ref(0);
-
-const searchResults = reactive({
-  loading: true,
-  list: [] as WalineSearchResult,
-});
-
-const wordLimit = ref(0);
-const isWordNumberLegal = ref(false);
-
-const content = ref('');
-
-const isSubmitting = ref(false);
-
-const isImageListEnd = ref(false);
-
-const locale = computed(() => config.value.locale);
-
-const isLogin = computed(() => Boolean(userInfo.value?.token));
-
-const canUploadImage = computed(() => config.value.imageUploader !== false);
-
-const insert = (content: string): void => {
-  const textArea = editorRef.value!;
-  const startPosition = textArea.selectionStart;
-  const endPosition = textArea.selectionEnd || 0;
-  const scrollTop = textArea.scrollTop;
-
-  editor.value =
-    textArea.value.substring(0, startPosition) +
-    content +
-    textArea.value.substring(endPosition, textArea.value.length);
-  textArea.focus();
-  textArea.selectionStart = startPosition + content.length;
-  textArea.selectionEnd = startPosition + content.length;
-  textArea.scrollTop = scrollTop;
-};
-
-const onKeyDown = (event: KeyboardEvent): void => {
-  const key = event.key;
-
-  // Shortcut key
-  if ((event.ctrlKey || event.metaKey) && key === 'Enter') void submitComment();
-};
-
-const uploadImage = (file: File): Promise<void> => {
-  const uploadText = `![${config.value.locale.uploading} ${file.name}]()`;
-
-  insert(uploadText);
-  isSubmitting.value = true;
-
-  return Promise.resolve()
-    .then(() => (config.value.imageUploader as WalineImageUploader)(file))
-    .then((url) => {
-      editor.value = editor.value.replace(
-        uploadText,
-        `\r\n![${file.name}](${url})`,
-      );
-    })
-    .catch((err: Error) => {
-      alert(err.message);
-      editor.value = editor.value.replace(uploadText, '');
-    })
-    .then(() => {
-      isSubmitting.value = false;
-    });
-};
-
-const onDrop = (event: DragEvent): void => {
-  if (event.dataTransfer?.items) {
-    const file = getImageFromDataTransfer(event.dataTransfer.items);
-
-    if (file && canUploadImage.value) {
-      void uploadImage(file);
-      event.preventDefault();
-    }
-  }
-};
-
-const onPaste = (event: ClipboardEvent): void => {
-  if (event.clipboardData) {
-    const file = getImageFromDataTransfer(event.clipboardData.items);
-
-    if (file && canUploadImage.value) void uploadImage(file);
-  }
-};
-
-const onChange = (): void => {
-  const inputElement = imageUploadRef.value!;
-
-  if (inputElement.files && canUploadImage.value)
-    void uploadImage(inputElement.files[0]).then(() => {
-      // clear input so a same image can be uploaded later
-      inputElement.value = '';
-    });
-};
-
-const submitComment = async (): Promise<void> => {
-  const {
-    serverURL,
-    lang,
-    login,
-    wordLimit,
-    requiredMeta,
-    recaptchaV3Key,
-    turnstileKey,
-  } = config.value;
-
-  const ua = await userAgent();
-  const comment: WalineCommentData = {
-    comment: content.value,
-    nick: userMeta.value.nick,
-    mail: userMeta.value.mail,
-    link: userMeta.value.link,
-    url: config.value.path,
-    ua,
-  };
-
-  // https://github.com/walinejs/waline/issues/2163
-  if (userInfo.value?.token && !props.edit) {
-    // login user
-    comment.nick = userInfo.value.display_name;
-    comment.mail = userInfo.value.email;
-    comment.link = userInfo.value.url;
-  } else {
-    if (login === 'force') return;
-
-    // check nick
-    if (requiredMeta.indexOf('nick') > -1 && !comment.nick) {
-      inputRefs.value.nick?.focus();
-
-      return alert(locale.value.nickError);
-    }
-
-    // check mail
-    if (
-      (requiredMeta.indexOf('mail') > -1 && !comment.mail) ||
-      (comment.mail && !isValidEmail(comment.mail))
-    ) {
-      inputRefs.value.mail?.focus();
-
-      return alert(locale.value.mailError);
-    }
-
-    if (!comment.nick) comment.nick = locale.value.anonymous;
-  }
-
-  // check comment
-  if (!comment.comment) {
-    editorRef.value?.focus();
-
-    return;
-  }
-
-  if (!isWordNumberLegal.value)
-    return alert(
-      locale.value.wordHint
-        .replace('$0', (wordLimit as [number, number])[0].toString())
-        .replace('$1', (wordLimit as [number, number])[1].toString())
-        .replace('$2', wordNumber.value.toString()),
-    );
-
-  comment.comment = parseEmoji(comment.comment, emoji.value.map);
-
-  if (props.replyId && props.rootId) {
-    comment.pid = props.replyId;
-    comment.rid = props.rootId;
-    comment.at = props.replyUser;
-  }
-
-  isSubmitting.value = true;
-
-  try {
-    if (recaptchaV3Key)
-      comment.recaptchaV3 =
-        await useReCaptcha(recaptchaV3Key).execute('social');
-
-    if (turnstileKey)
-      comment.turnstile = await useTurnstile(turnstileKey).execute('social');
-
-    const options = {
-      serverURL,
-      lang,
-      token: userInfo.value?.token,
-      comment,
-    };
-
-    const resp = await (props.edit
-      ? updateComment({
-          objectId: props.edit.objectId,
-          ...options,
-        })
-      : addComment(options));
-
-    isSubmitting.value = false;
-
-    if (resp.errmsg) return alert(resp.errmsg);
-
-    emit('submit', resp.data!);
-
-    editor.value = '';
-
-    previewText.value = '';
-
-    if (props.replyId) emit('cancelReply');
-    if (props.edit?.objectId) emit('cancelEdit');
-  } catch (err: unknown) {
-    isSubmitting.value = false;
-
-    alert((err as TypeError).message);
-  }
-};
-
-const onLogin = (event: Event): void => {
-  event.preventDefault();
-  const { lang, serverURL } = config.value;
-
-  void login({
-    serverURL,
-    lang,
-  }).then((data) => {
-    userInfo.value = data;
-    (data.remember ? localStorage : sessionStorage).setItem(
-      'WALINE_USER',
-      JSON.stringify(data),
-    );
-    emit('log');
-  });
-};
-
-const onLogout = (): void => {
-  userInfo.value = {};
-  localStorage.setItem('WALINE_USER', 'null');
-  sessionStorage.setItem('WALINE_USER', 'null');
-  emit('log');
-};
-
-const onProfile = (event: Event): void => {
-  event.preventDefault();
-
-  const { lang, serverURL } = config.value;
-
-  const width = 800;
-  const height = 800;
-  const left = (window.innerWidth - width) / 2;
-  const top = (window.innerHeight - height) / 2;
-  const query = new URLSearchParams({
-    lng: lang,
-    token: userInfo.value.token,
-  });
-  const handler = window.open(
-    `${serverURL}/ui/profile?${query.toString()}`,
-    '_blank',
-    `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no`,
-  );
-
-  handler?.postMessage({ type: 'TOKEN', data: userInfo.value.token }, '*');
-};
-
-const popupHandler = (event: MouseEvent): void => {
-  if (
-    !emojiButtonRef.value?.contains(event.target as Node) &&
-    !emojiPopupRef.value?.contains(event.target as Node)
-  )
-    showEmoji.value = false;
-
-  if (
-    !gifButtonRef.value?.contains(event.target as Node) &&
-    !gifPopupRef.value?.contains(event.target as Node)
-  )
-    showGif.value = false;
-};
-
-const onImageWallScroll = async (event: Event): Promise<void> => {
-  const { scrollTop, clientHeight, scrollHeight } =
-    event.target as HTMLDivElement;
-  const percent = (clientHeight + scrollTop) / scrollHeight;
-  const searchOptions = config.value.search as WalineSearchOptions;
-  const keyword = gifSearchInputRef.value?.value || '';
-
-  if (percent < 0.9 || searchResults.loading || isImageListEnd.value) return;
-
-  searchResults.loading = true;
-
-  const searchResult =
-    searchOptions.more && searchResults.list.length
-      ? await searchOptions.more(keyword, searchResults.list.length)
-      : await searchOptions.search(keyword);
-
-  if (searchResult.length)
-    searchResults.list = [
-      ...searchResults.list,
-      ...(searchOptions.more && searchResults.list.length
-        ? await searchOptions.more(keyword, searchResults.list.length)
-        : await searchOptions.search(keyword)),
-    ];
-  else isImageListEnd.value = true;
-
-  searchResults.loading = false;
-
-  setTimeout(() => {
-    (event.target as HTMLDivElement).scrollTop = scrollTop;
-  }, 50);
-};
-
-const onGifSearch = useDebounceFn((event: Event) => {
-  searchResults.list = [];
-  isImageListEnd.value = false;
-  void onImageWallScroll(event);
-}, 300);
-
-// update wordNumber
-watch(
-  [config, wordNumber],
-  ([config, wordNumber]) => {
-    const { wordLimit: limit } = config;
-
-    if (limit) {
-      if (wordNumber < limit[0] && limit[0] !== 0) {
-        wordLimit.value = limit[0];
-        isWordNumberLegal.value = false;
-      } else if (wordNumber > limit[1]) {
-        wordLimit.value = limit[1];
-        isWordNumberLegal.value = false;
-      } else {
-        wordLimit.value = limit[1];
-        isWordNumberLegal.value = true;
-      }
-    } else {
-      wordLimit.value = 0;
-      isWordNumberLegal.value = true;
-    }
-  },
-  { immediate: true },
-);
-
-const onMessageReceive = ({
-  data,
-}: {
-  data: { type: 'profile'; data: UserInfo };
-}): void => {
-  if (!data || data.type !== 'profile') return;
-
-  userInfo.value = { ...userInfo.value, ...data.data };
-
-  [localStorage, sessionStorage]
-    .filter((store) => store.getItem('WALINE_USER'))
-    .forEach((store) => store.setItem('WALINE_USER', JSON.stringify(userInfo)));
-};
-
-onMounted(() => {
-  document.body.addEventListener('click', popupHandler);
-  window.addEventListener('message', onMessageReceive);
-  if (props.edit?.objectId) {
-    editor.value = props.edit.orig;
-  }
-
-  // watch gif
-  watch(showGif, async (showGif) => {
-    if (!showGif) return;
-
-    const searchOptions = config.value.search as WalineSearchOptions;
-
-    // clear input
-    if (gifSearchInputRef.value) gifSearchInputRef.value.value = '';
-
-    searchResults.loading = true;
-
-    searchResults.list = searchOptions.default
-      ? await searchOptions.default()
-      : await searchOptions.search('');
-
-    searchResults.loading = false;
-  });
-
-  // watch editor
-  watch(
-    () => editor.value,
-    (value) => {
-      const { highlighter, texRenderer } = config.value;
-
-      content.value = value;
-      previewText.value = parseMarkdown(value, {
-        emojiMap: emoji.value.map,
-        highlighter,
-        texRenderer,
-      });
-      wordNumber.value = getWordNumber(value);
-
-      if (value) autosize(editorRef.value!);
-      else autosize.destroy(editorRef.value!);
-    },
-    { immediate: true },
-  );
-
-  // watch emoji value change
-  watch(
-    () => config.value.emoji,
-    (emojiConfig) =>
-      getEmojis(emojiConfig).then((config) => {
-        emoji.value = config;
-      }),
-    { immediate: true },
-  );
-});
-
-onUnmounted(() => {
-  document.body.removeEventListener('click', popupHandler);
-  window.removeEventListener('message', onMessageReceive);
-});
-</script>

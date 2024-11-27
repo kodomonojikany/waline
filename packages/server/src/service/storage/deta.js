@@ -172,7 +172,7 @@ module.exports = class extends Base {
        */
       const item = await this.instance.get(conditions.key);
 
-      item && data.push(item);
+      if (item) data.push(item);
     } else if (offset) {
       /**
        * deta base need last data key when pagination
@@ -254,18 +254,18 @@ module.exports = class extends Base {
         groupFlatValue[group] = null;
       });
 
-      for (let j = 0; j < where._complex[groupName][1].length; j++) {
+      for (const item of where._complex[groupName][1]) {
         const groupWhere = {
           ...where,
           ...groupFlatValue,
           _complex: undefined,
-          [groupName]: where._complex[groupName][1][j],
+          [groupName]: item,
         };
         const num = await this.count(groupWhere);
 
         counts.push({
           ...groupFlatValue,
-          [groupName]: where._complex[groupName][1][j],
+          [groupName]: item,
           count: num,
         });
       }

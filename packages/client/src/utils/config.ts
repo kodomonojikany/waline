@@ -2,19 +2,19 @@ import { decodePath, isLinkHttp, removeEndingSplash } from './path.js';
 import {
   DEFAULT_EMOJI,
   DEFAULT_REACTION,
-  defaultUploadImage,
   defaultHighlighter,
   defaultTeXRenderer,
+  defaultUploadImage,
   getDefaultSearchOptions,
-  getMeta,
-  getLocale,
   getLang,
+  getLocale,
+  getMeta,
 } from '../config/index.js';
-import {
-  type WalineEmojiInfo,
-  type WalineEmojiMaps,
-  type WalineLocale,
-  type WalineProps,
+import type {
+  WalineEmojiInfo,
+  WalineEmojiMaps,
+  WalineLocale,
+  WalineProps,
 } from '../typings/index.js';
 
 export interface WalineEmojiConfig {
@@ -90,7 +90,7 @@ export const getConfig = ({
   path: decodePath(path),
   lang: getLang(lang),
   locale: {
-    ...getLocale(lang),
+    ...getLocale(getLang(lang)),
     ...(typeof locale === 'object' ? locale : {}),
   } as WalineLocale,
   wordLimit: getWordLimit(wordLimit),

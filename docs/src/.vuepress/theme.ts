@@ -7,6 +7,7 @@ export default hopeTheme(
   {
     hostname: 'https://waline.js.org',
     favicon: '/favicon.ico',
+    iconAssets: '//at.alicdn.com/t/c/font_3180165_6o97v6oir2j.css',
 
     logo: '/logo.png',
     repo: 'walinejs/waline',
@@ -14,7 +15,6 @@ export default hopeTheme(
     docsBranch: 'main',
 
     pageInfo: ['ReadingTime', 'PageView'],
-
     contributors: false,
 
     locales: {
@@ -35,18 +35,9 @@ export default hopeTheme(
       },
     },
 
-    iconAssets: '//at.alicdn.com/t/c/font_3180165_u7vein90ekb.css',
-
     plugins: {
-      blog: false,
-
       comment: {
         provider: 'Waline',
-        login: 'force',
-        serverURL: 'https://walinejs.comment.lithub.cc',
-        recaptchaV3Key: '6Lfz4-shAAAAANgsYRR0datkzv6zLIaKrSqfHsiG',
-        pageview: true,
-        reaction: true,
         locales: {
           '/': {
             admin: '可爱的管理员',
@@ -57,7 +48,7 @@ export default hopeTheme(
             level4: '元婴',
             level5: '化神',
           },
-          '/en': {
+          '/en/': {
             admin: 'GM',
             level0: 'Dwarves',
             level1: 'Hobbits',
@@ -70,7 +61,7 @@ export default hopeTheme(
       },
 
       components: {
-        components: ['BiliBili', 'YouTube'],
+        components: ['BiliBili', 'VidStack'],
       },
 
       docsearch: {
@@ -79,10 +70,17 @@ export default hopeTheme(
         indexName: 'waline',
       },
 
-      mdEnhance: {
-        codetabs: true,
+      markdownImage: {
         figure: true,
-        mathjax: true,
+      },
+
+      markdownMath: {
+        type: 'mathjax',
+      },
+
+      markdownTab: { codeTabs: true },
+
+      mdEnhance: {
         sub: true,
         sup: true,
         tasklist: true,

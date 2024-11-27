@@ -1,7 +1,6 @@
 ---
 title: 组件属性
 icon: config
-redirectFrom: /reference/component.html
 ---
 
 ## serverURL
@@ -50,6 +49,8 @@ Waline 的服务端地址。
 - `'ru-RU'`
 - `fr-FR`
 - `fr`
+- `'es'`
+- `'es-MX'`
 
 ## locale
 

@@ -1,7 +1,6 @@
 ---
 title: Component Props
 icon: config
-redirectFrom: /en/reference/component.html
 ---
 
 ## serverURL
@@ -50,6 +49,8 @@ Optional value:
 - `'ru-RU'`
 - `fr-FR`
 - `fr`
+- `'es'`
+- `'es-MX'`
 
 ## locale
 

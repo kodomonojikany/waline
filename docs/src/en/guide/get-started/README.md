@@ -1,7 +1,9 @@
 ---
 title: Get Started
 icon: creative
-redirectFrom: /en/guide/get-started.html
+dir:
+  collapsible: false
+  order: 1
 ---
 
 Welcome to Waline. In just a few steps, you can enable Waline to provide comments and pageviews on your site.
@@ -128,4 +130,4 @@ Here is how you can add Waline to your web page or website:
 
 An enthusiastic Waline user made the following video tutorial. If the instructions above aren't clear, you can refer to the video:
 
-<YouTube id="SzEHzsme8uY" />
+<VidStack src="https://www.youtube.com/watch?v=SzEHzsme8uY" />

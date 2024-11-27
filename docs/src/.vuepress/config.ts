@@ -1,11 +1,10 @@
 import { viteBundler } from '@vuepress/bundler-vite';
-import { redirectPlugin } from '@vuepress/plugin-redirect';
-import { type UserConfig, defineUserConfig } from 'vuepress';
+import { defineUserConfig } from 'vuepress';
 import { path } from 'vuepress/utils';
 
 import theme from './theme.js';
 
-export default <UserConfig>defineUserConfig({
+export default defineUserConfig({
   locales: {
     '/': {
       lang: 'zh-CN',
@@ -19,12 +18,6 @@ export default <UserConfig>defineUserConfig({
     },
   },
 
-  markdown: {
-    code: {
-      lineNumbers: 20,
-    },
-  },
-
   bundler: viteBundler({
     viteOptions: {
       ssr: {
@@ -34,8 +27,6 @@ export default <UserConfig>defineUserConfig({
   }),
 
   theme,
-
-  plugins: [redirectPlugin()],
 
   alias: {
     '@MigrationTool': path.resolve(__dirname, './components/MigrationTool.vue'),

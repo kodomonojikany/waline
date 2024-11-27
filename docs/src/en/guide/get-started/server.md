@@ -1,7 +1,7 @@
 ---
 title: Server introduction
 icon: server
-redirectFrom: /en/guide/server/intro.html
+order: 2
 ---
 
 ## Deployment
@@ -10,9 +10,9 @@ In addition to deploying on Vercel for free, you can deploy via docker or direct
 
 - [Standalone deployment](../deploy/vps.md)
 
-- [Deta](../deploy/deta.md)
-
 - [Railway](../deploy/railway.md)
+
+- [Alibaba Cloud Compute Nest](../deploy/aliyun-computenest.md)
 
 ## Multiple Database Support
 

@@ -3,7 +3,7 @@ import { createApp, h, reactive, watchEffect } from 'vue';
 import { commentCount } from './comment.js';
 import Waline from './components/WalineComment.vue';
 import { pageviewCount } from './pageview.js';
-import { type WalineInitOptions } from './typings/index.js';
+import type { WalineInitOptions } from './typings/index.js';
 import { getRoot, isString } from './utils/index.js';
 
 export interface WalineInstance {
@@ -94,7 +94,6 @@ export const init = ({
       Object.entries(newProps).forEach(([key, value]) => {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        // eslint-disable-next-line
         props[key] = value;
       });
 
