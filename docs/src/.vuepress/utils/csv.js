@@ -1,4 +1,3 @@
-/* eslint-disable */
 var CSV = {};
 !(function (p) {
   'use strict';
@@ -10,7 +9,7 @@ var CSV = {};
       var t,
         n,
         e = new Promise(function (e, r) {
-          (t = e), (n = r);
+          ((t = e), (n = r));
         });
       return {
         resolve: t,
@@ -20,16 +19,16 @@ var CSV = {};
         },
       };
     };
-  (p.fetch = function (t) {
+  ((p.fetch = function (t) {
     var n = new o();
     if (t.file) {
       var e = new FileReader(),
         r = t.encoding || 'UTF-8';
-      (e.onload = function (e) {
+      ((e.onload = function (e) {
         var r = p.extractFields(p.parse(e.target.result, t), t);
-        (r.useMemoryStore = !0),
+        ((r.useMemoryStore = !0),
           (r.metadata = { filename: t.file.name }),
-          n.resolve(r);
+          n.resolve(r));
       }),
         (e.onerror = function (e) {
           n.reject({
@@ -38,10 +37,10 @@ var CSV = {};
             },
           });
         }),
-        e.readAsText(t.file, r);
+        e.readAsText(t.file, r));
     } else if (t.data) {
       var i = p.extractFields(p.parse(t.data, t), t);
-      (i.useMemoryStore = !0), n.resolve(i);
+      ((i.useMemoryStore = !0), n.resolve(i));
     } else if (t.url) {
       (
         window.fetch ||
@@ -49,10 +48,10 @@ var CSV = {};
           var r = jQuery.get(e),
             t = {
               then: function (e) {
-                return r.done(e), t;
+                return (r.done(e), t);
               },
               catch: function (e) {
-                return r.fail(e), t;
+                return (r.fail(e), t);
               },
             };
           return t;
@@ -63,7 +62,7 @@ var CSV = {};
         })
         .then(function (e) {
           var r = p.extractFields(p.parse(e, t), t);
-          (r.useMemoryStore = !0), n.resolve(r);
+          ((r.useMemoryStore = !0), n.resolve(r));
         })
         .catch(function (e, r) {
           n.reject({
@@ -102,12 +101,12 @@ var CSV = {};
       var t,
         n,
         i = p.normalizeDialectOptions(r);
-      (t = e),
+      ((t = e),
         (n = i.lineterminator),
         (e =
           t.charAt(t.length - n.length) !== n
             ? t
-            : t.substring(0, t.length - n.length));
+            : t.substring(0, t.length - n.length)));
       var o,
         a,
         l = '',
@@ -131,7 +130,7 @@ var CSV = {};
         o < e.length;
         o += 1
       )
-        (l = e.charAt(o)),
+        ((l = e.charAt(o)),
           !1 !== s || (l !== i.delimiter && l !== i.lineterminator)
             ? l !== i.quotechar
               ? (c += l)
@@ -144,7 +143,7 @@ var CSV = {};
               f.push(c),
               l === i.lineterminator && (d.push(f), (f = [])),
               (c = ''),
-              (u = !1));
+              (u = !1)));
       return (
         (c = a(c)),
         f.push(c),
@@ -201,13 +200,13 @@ var CSV = {};
         n += 1
       )
         for (l = t[n], i = 0; i < l.length; i += 1)
-          (s = o(l[i])),
+          ((s = o(l[i])),
             i === l.length - 1
               ? ((c += (u += s) + a.lineterminator), (u = ''))
               : (u += s + a.delimiter),
-            (s = '');
+            (s = ''));
       return c;
-    });
+    }));
   var h = /^\d+$/,
     m = /^\d*\.\d+$|^\d+\.\d*$/,
     f = /^\s|\s$|,|"|\n/,

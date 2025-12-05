@@ -7,7 +7,6 @@ export default hopeTheme(
   {
     hostname: 'https://waline.js.org',
     favicon: '/favicon.ico',
-    iconAssets: '//at.alicdn.com/t/c/font_3180165_6o97v6oir2j.css',
 
     logo: '/logo.png',
     repo: 'walinejs/waline',
@@ -33,6 +32,17 @@ export default hopeTheme(
         footer: 'GPL-2.0 LICENSE | Copyright © 2020-present lizheming',
         displayFooter: true,
       },
+    },
+
+    markdown: {
+      codeTabs: true,
+      figure: true,
+      math: {
+        type: 'mathjax',
+      },
+      sub: true,
+      sup: true,
+      tasklist: true,
     },
 
     plugins: {
@@ -70,20 +80,8 @@ export default hopeTheme(
         indexName: 'waline',
       },
 
-      markdownImage: {
-        figure: true,
-      },
-
-      markdownMath: {
-        type: 'mathjax',
-      },
-
-      markdownTab: { codeTabs: true },
-
-      mdEnhance: {
-        sub: true,
-        sup: true,
-        tasklist: true,
+      icon: {
+        assets: '//at.alicdn.com/t/c/font_3180165_6o97v6oir2j.css',
       },
     },
   },

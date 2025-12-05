@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const fetch = require('node-fetch');
 
 module.exports = class extends think.Controller {
   constructor(ctx) {
@@ -16,16 +15,16 @@ module.exports = class extends think.Controller {
 
     if (!hasCode) {
       const { serverURL } = this.ctx;
-      const redirectUrl = `${serverURL}/api/oauth?${new URLSearchParams({
+      const redirectUrl = think.buildUrl(`${serverURL}/api/oauth`, {
         redirect,
         type,
-      }).toString()}`;
+      });
 
       return this.redirect(
-        `${oauthUrl}/${type}?${new URLSearchParams({
+        think.buildUrl(`${oauthUrl}/${type}`, {
           redirect: redirectUrl,
           state: this.ctx.state.token || '',
-        }).toString()}`,
+        }),
       );
     }
 
@@ -36,26 +35,23 @@ module.exports = class extends think.Controller {
 
     if (type === 'facebook') {
       const { serverURL } = this.ctx;
-      const redirectUrl = `${serverURL}/api/oauth?${new URLSearchParams({
+      const redirectUrl = think.buildUrl(`${serverURL}/api/oauth`, {
         redirect,
         type,
-      }).toString()}`;
+      });
 
-      params.state = new URLSearchParams({
+      params.state = think.buildUrl(undefined, {
         redirect: redirectUrl,
         state: this.ctx.state.token || '',
       });
     }
 
-    const user = await fetch(
-      `${oauthUrl}/${type}?${new URLSearchParams(params).toString()}`,
-      {
-        method: 'GET',
-        headers: {
-          'user-agent': '@waline',
-        },
+    const user = await fetch(think.buildUrl(`${oauthUrl}/${type}`, params), {
+      method: 'GET',
+      headers: {
+        'user-agent': '@waline',
       },
-    ).then((resp) => resp.json());
+    }).then((resp) => resp.json());
 
     if (!user?.id) {
       return this.fail(user);
@@ -67,9 +63,7 @@ module.exports = class extends think.Controller {
       const token = jwt.sign(userBySocial[0].email, this.config('jwtKey'));
 
       if (redirect) {
-        return this.redirect(
-          redirect + (redirect.includes('?') ? '&' : '?') + 'token=' + token,
-        );
+        return this.redirect(think.buildUrl(redirect, { token }));
       }
 
       return this.success();

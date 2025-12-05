@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useNow } from '@vueuse/core';
 import type { WalineComment, WalineCommentStatus } from '@waline/api';
-import type { ComputedRef } from 'vue';
 import { computed, inject } from 'vue';
 
 import CommentBox from './CommentBox.vue';
 import {
+  AdministratorIcon,
   DeleteIcon,
   EditIcon,
   LikeIcon,
@@ -13,51 +13,45 @@ import {
   VerifiedIcon,
 } from './Icons.js';
 import { useLikeStorage, useUserInfo } from '../composables/index.js';
-import type { WalineConfig } from '../utils/index.js';
 import { getTimeAgo, isLinkHttp } from '../utils/index.js';
+import { configKey } from '../config/index.js';
 
-const props = withDefaults(
-  defineProps<{
-    /**
-     * Comment data
-     */
-    comment: WalineComment;
-    /**
-     * Current comment to be edited
-     */
-    edit?: WalineComment | null;
-    /**
-     * Root comment id
-     */
-    rootId: string;
-    /**
-     * Current comment to be replied
-     */
-    reply?: WalineComment | null;
-  }>(),
-  {
-    edit: null,
-    reply: null,
-  },
-);
+const props = defineProps<{
+  /**
+   * Comment data
+   */
+  comment: WalineComment;
+  /**
+   * Current comment to be edited
+   */
+  edit?: WalineComment | null;
+  /**
+   * Root comment id
+   */
+  rootId: number;
+  /**
+   * Current comment to be replied
+   */
+  reply?: WalineComment | null;
+}>();
 
 const emit = defineEmits<{
   (event: 'log'): void;
-  (event: 'submit', comment: WalineComment): void;
-  (event: 'delete', comment: WalineComment): void;
-  (event: 'edit', comment: WalineComment | null): void;
-  (event: 'like', comment: WalineComment): void;
+  (
+    event: 'submit' | 'delete' | 'like' | 'sticky',
+    comment: WalineComment,
+  ): void;
+  (event: 'edit' | 'reply', comment: WalineComment | null): void;
   (
     event: 'status',
     statusInfo: { status: WalineCommentStatus; comment: WalineComment },
   ): void;
-  (event: 'sticky', comment: WalineComment): void;
-  (event: 'reply', comment: WalineComment | null): void;
 }>();
 
 const commentStatus: WalineCommentStatus[] = ['approved', 'waiting', 'spam'];
 
-const config = inject<ComputedRef<WalineConfig>>('config')!;
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+const config = inject(configKey)!;
 const likes = useLikeStorage();
 const now = useNow();
 const userInfo = useUserInfo();
@@ -93,7 +87,7 @@ const isEditingCurrent = computed(
 </script>
 
 <template>
-  <div :id="comment.objectId" class="wl-card-item">
+  <div :id="comment.objectId.toString()" class="wl-card-item">
     <div class="wl-user" aria-hidden="true">
       <img
         v-if="comment.avatar"
@@ -102,7 +96,9 @@ const isEditingCurrent = computed(
         alt=""
       />
 
-      <VerifiedIcon v-if="comment.type" />
+      <VerifiedIcon v-if="comment.type === 'guest'" />
+
+      <AdministratorIcon v-if="comment.type === 'administrator'" />
     </div>
 
     <div class="wl-card">
@@ -117,12 +113,6 @@ const isEditingCurrent = computed(
         >
 
         <span v-else class="wl-nick">{{ comment.nick }}</span>
-
-        <span
-          v-if="comment.type === 'administrator'"
-          class="wl-badge"
-          v-text="locale.admin"
-        />
 
         <span v-if="comment.label" class="wl-badge" v-text="comment.label" />
 
@@ -194,7 +184,7 @@ const isEditingCurrent = computed(
       </div>
       <!-- eslint-disable vue/no-v-html -->
       <div v-if="!isEditingCurrent" class="wl-content">
-        <p v-if="comment.reply_user">
+        <p v-if="'reply_user' in comment && comment.reply_user">
           <a :href="'#' + comment.pid">@{{ comment.reply_user.nick }}</a>
 
           <span>: </span>
